@@ -1,0 +1,30 @@
+name: Diagnose experimental script CDN
+on:
+  push:
+    branches: [adex]
+    paths:
+      - '.github/workflows/diagnose-userscript.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-cdn:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check GitHub-hosted script distribution
+        run: |
+          set +e
+          for url in \
+            'https://cdn.jsdelivr.net/gh/sharkmantv/TizenTubeCobalt@adex/js1.js?v=2.0.3' \
+            'https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js?v=2.0.3' \
+            'https://raw.githubusercontent.com/sharkmantv/TizenTubeCobalt/adex/js1.js'
+          do
+            echo "Checking $url"
+            curl --max-time 20 --location --silent --show-error \
+              --output /tmp/response -w 'HTTP=%{http_code} BYTES=%{size_download} CONTENT_TYPE=%{content_type}\n' "$url"
+            head -c 200 /tmp/response | tr '\n' ' '
+            echo
+            echo '---'
+          done
