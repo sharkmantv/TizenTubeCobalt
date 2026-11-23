@@ -1,0 +1,84 @@
+name: Cobalt ARM experimental ad-filter APK
+on:
+  push:
+    branches: [adex]
+    paths:
+      - 'adfilter/**'
+      - '.github/workflows/cobalt-adfilter-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-arm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout minimal patch files
+        uses: actions/checkout@v4
+        with:
+          ref: adex
+          sparse-checkout: |
+            adfilter
+            .github/workflows/cobalt-adfilter-apk.yml
+          sparse-checkout-cone-mode: false
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Obtain TizenTube userscript source
+        run: |
+          mkdir -p external
+          git clone --depth 1 https://github.com/reisxd/TizenTube.git external/tizentube
+      - name: Apply targeted promotion-card filter
+        run: python3 adfilter/apply_patch.py external/tizentube
+      - name: Compile production userscript
+        run: |
+          cd external/tizentube/mods
+          npm ci --no-audit --no-fund
+          npm run build
+          test -s ../dist/userScript.js
+          node --check ../dist/userScript.js
+      - name: Publish branch-hosted userscript
+        run: |
+          cp external/tizentube/dist/userScript.js js1.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add js1.js
+          git commit -m "Build experimental ad-filter userscript" || echo "Compiled script unchanged"
+          git push origin HEAD:adex
+      - name: Download upstream official ARM APK
+        run: |
+          mkdir -p out
+          curl --fail --location --retry 3 \
+            "https://github.com/reisxd/TizenTubeCobalt/releases/download/v2.0.3/cobalt-arm.apk" \
+            --output out/original-arm.apk
+          test -s out/original-arm.apk
+      - name: Change only native userscript location
+        run: |
+          python3 adfilter/repack.py out/original-arm.apk out/cobalt-unsigned.apk
+          python3 -m zipfile -t out/cobalt-unsigned.apk
+      - name: Align and test-sign separate APK
+        run: |
+          BT=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)
+          if [ ! -x "$BT/apksigner" ] || [ ! -x "$BT/zipalign" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0"
+            BT="$ANDROID_HOME/build-tools/35.0.0"
+          fi
+          "$BT/zipalign" -f -p 4 out/cobalt-unsigned.apk out/cobalt-aligned.apk
+          keytool -genkeypair -noprompt -v -keystore out/test-signing.jks \
+            -storepass androidtest123 -keypass androidtest123 -alias test \
+            -keyalg RSA -keysize 3072 -validity 3650 \
+            -dname "CN=Experimental Cobalt AdFilter, O=Local Test"
+          "$BT/apksigner" sign --ks out/test-signing.jks \
+            --ks-pass pass:androidtest123 --key-pass pass:androidtest123 \
+            --out out/TizenTubeCobalt-ARM-AdFilter-EXPERIMENTAL.apk out/cobalt-aligned.apk
+          "$BT/apksigner" verify --verbose out/TizenTubeCobalt-ARM-AdFilter-EXPERIMENTAL.apk
+      - name: Upload experimental APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TizenTube-Cobalt-ARM-AdFilter-Experimental
+          path: out/TizenTubeCobalt-ARM-AdFilter-EXPERIMENTAL.apk
+          if-no-files-found: error
+          retention-days: 14
