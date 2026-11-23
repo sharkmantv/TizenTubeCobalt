@@ -1,3 +1,9 @@
+## TEST RESULT — 23 November 2026: FAILED / DO NOT INSTALL
+
+The TV tester reported that the experimental APK still showed sponsorships **and also displayed video adverts**, worse than the original. The experimental test is **not approved**.
+
+GitHub Actions separately confirmed the patched JSDelivr userscript URL returned HTTP 200 and JavaScript; that does not establish successful runtime injection or functioning ad filtering on the TV. Do not interpret passing CI/build/signing as actual ad-blocker validation. Revert to the original Cobalt APK pending a targeted reproduction/log inspection. **No additional patched APK should be distributed as a fix without device verification.**
+
 # Cobalt experimental ad-filter APK (fork branch adex)
 
 This branch is **only an experiment**. The GitHub Actions workflow compiles a
