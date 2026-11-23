@@ -1,0 +1,66 @@
+name: TizenTube Cobalt AdFilter V2 APK
+on:
+  push:
+    branches: [ad2]
+    paths: [.github/workflows/build-adfilter-apk.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ad2
+          sparse-checkout: |
+            adfilter
+            .github/workflows/build-adfilter-apk.yml
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build patched userscript using original published version
+        run: |
+          set -e
+          curl -fLsS --retry 3 'https://cdn.jsdelivr.net/npm/@foxreis/tizentube/dist/userScript.js?v=2.0.3' -o upstream.js
+          node --check upstream.js
+          cp upstream.js safe.js
+          printf '\n;\n' >> safe.js
+          cat adfilter/safe_addon.js >> safe.js
+          cmp -n "$(wc -c < upstream.js)" upstream.js safe.js
+          node --check safe.js
+          node adfilter/test_addon.js
+      - name: Publish script to ad2 branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --sparse safe.js
+          git commit -m 'Publish original upstream script with extra Home filter' || true
+          git push origin HEAD:ad2
+      - name: Verify published CDN script
+        run: |
+          set -e
+          for i in $(seq 1 10); do
+            curl -fLsS 'https://cdn.jsdelivr.net/gh/sharkmantv/TizenTubeCobalt@ad2/safe.js?v=2.0.3' -o cdn.js || true
+            if cmp -s cdn.js safe.js; then echo 'CDN matches'; break; fi
+            if [ "$i" -eq 10 ]; then echo 'CDN failed verification'; exit 1; fi
+            sleep 5
+          done
+      - name: Prepare original APK
+        run: |
+          mkdir -p out
+          curl -fLsS --retry 3 'https://github.com/reisxd/TizenTubeCobalt/releases/download/v2.0.3/cobalt-arm.apk' -o out/original.apk
+          python3 adfilter/repack_v2.py out/original.apk out/unsigned.apk
+      - name: Sign and verify APK
+        run: |
+          BT="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)"
+          "$BT/zipalign" -f -p 4 out/unsigned.apk out/aligned.apk
+          keytool -genkeypair -noprompt -keystore out/test.jks -storepass testcobalt123 -keypass testcobalt123 -alias testkey -keyalg RSA -keysize 3072 -validity 3650 -dname 'CN=Cobalt AdFilter Experimental'
+          "$BT/apksigner" sign --ks out/test.jks --ks-pass pass:testcobalt123 --key-pass pass:testcobalt123 --out out/Cobalt-AdFilter-v2-TEST.apk out/aligned.apk
+          "$BT/apksigner" verify --verbose out/Cobalt-AdFilter-v2-TEST.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cobalt-AdFilter-v2-TEST
+          path: out/Cobalt-AdFilter-v2-TEST.apk
+          if-no-files-found: error
